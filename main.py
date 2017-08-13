@@ -74,7 +74,7 @@ class FFTConvTest:
             spatial_filter_for_fft = tf.transpose(spatial_filter, [2, 3, 0, 1])
 
             # Compute the spectral filter for visualization
-            spectral_filter = tf.batch_fft2d(tf.complex(spatial_filter_for_fft, spatial_filter_for_fft * 0.0))
+            spectral_filter = tf.fft2d(tf.complex(spatial_filter_for_fft, spatial_filter_for_fft * 0.0))
 
         conv = tf.nn.conv2d(source, spatial_filter, strides=[1, stride, stride, 1], padding='SAME')
         output = tf.nn.bias_add(conv, b)
@@ -111,7 +111,7 @@ class FFTConvTest:
     def fft_conv(self, source, filters, width, height, stride, activation='relu', name='fft_conv'):
         # This function implements a convolution using a spectrally parameterized filter with the normal
         # tf.nn.conv2d() convolution operation. This is done by transforming the spectral filter to spatial
-        # via tf.batch_ifft2d()
+        # via tf.ifft2d()
 
         channels = source.get_shape().as_list()[3]
 
@@ -122,19 +122,19 @@ class FFTConvTest:
                 init = self.initialization[name]
 
             # Option 1: Over-Parameterize fully in the spectral domain
-            # w_real = tf.Variable(init.real, dtype=tf.float32, name='real')
-            # w_imag = tf.Variable(init.imag, dtype=tf.float32, name='imag')
-            # w = tf.cast(tf.complex(w_real, w_imag), tf.complex64)
+            w_real = tf.Variable(init.real, dtype=tf.float32, name='real')
+            w_imag = tf.Variable(init.imag, dtype=tf.float32, name='imag')
+            w = tf.cast(tf.complex(w_real, w_imag), tf.complex64)
 
             # Option 2: Parameterize only 'free' parameters in the spectral domain to enforce conjugate symmetry
             #           This is very slow.
-            w = self.spectral_to_variable(init)
+            # w = self.spectral_to_variable(init)
 
             b = tf.Variable(tf.constant(0.1, shape=[filters]))
 
         # Transform the spectral parameters into a spatial filter
         # and reshape for tf.nn.conv2d
-        complex_spatial_filter = tf.batch_ifft2d(w)
+        complex_spatial_filter = tf.ifft2d(w)
         spatial_filter = tf.real(complex_spatial_filter)
         spatial_filter = tf.transpose(spatial_filter, [2, 3, 0, 1])
 
@@ -147,20 +147,28 @@ class FFTConvTest:
     def batch_fftshift2d(self, tensor):
         # Shifts high frequency elements into the center of the filter
         indexes = len(tensor.get_shape()) - 1
-        top, bottom = tf.split(indexes, 2, tensor)
-        tensor = tf.concat(indexes, [bottom, top])
-        left, right = tf.split(indexes - 1, 2, tensor)
-        tensor = tf.concat(indexes - 1, [right, left])
+        # top, bottom = tf.split(indexes, 2, tensor)
+        top, bottom = tf.split(tensor, 2, indexes)
+        # tensor = tf.concat(indexes, [bottom, top])
+        tensor = tf.concat([bottom, top], indexes)
+        # left, right = tf.split(indexes - 1, 2, tensor)
+        left, right = tf.split(tensor, 2, indexes - 1)
+        # tensor = tf.concat(indexes - 1, [right, left])
+        tensor = tf.concat([right, left], indexes - 1)
 
         return tensor
 
     def batch_ifftshift2d(self, tensor):
         # Shifts high frequency elements into the center of the filter
         indexes = len(tensor.get_shape()) - 1
-        left, right = tf.split(indexes - 1, 2, tensor)
-        tensor = tf.concat(indexes - 1, [right, left])
-        top, bottom = tf.split(indexes, 2, tensor)
-        tensor = tf.concat(indexes, [bottom, top])
+        # left, right = tf.split(indexes - 1, 2, tensor)
+        left, right = tf.split(tensor, 2, indexes - 1)
+        # tensor = tf.concat(indexes - 1, [right, left])
+        tensor = tf.concat([right, left], indexes - 1)
+        # top, bottom = tf.split(indexes, 2, tensor)
+        top, bottom = tf.split(tensor, 2, indexes)
+        # tensor = tf.concat(indexes, [bottom, top])
+        tensor = tf.concat([bottom, top], indexes)
 
         return tensor
 
@@ -177,19 +185,19 @@ class FFTConvTest:
                 init = self.initialization[name]
 
             # Option 1: Over-Parameterize fully in the spectral domain
-            # w_real = tf.Variable(init.real, dtype=tf.float32, name='real')
-            # w_imag = tf.Variable(init.imag, dtype=tf.float32, name='imag')
-            # w = tf.cast(tf.complex(w_real, w_imag), tf.complex64)
+            w_real = tf.Variable(init.real, dtype=tf.float32, name='real')
+            w_imag = tf.Variable(init.imag, dtype=tf.float32, name='imag')
+            w = tf.cast(tf.complex(w_real, w_imag), tf.complex64)
 
             # Option 2: Parameterize only 'free' parameters in the spectral domain to enforce conjugate symmetry
             #           This is very slow.
-            w = self.spectral_to_variable(init)
+            # w = self.spectral_to_variable(init)
 
             # Option 3: Parameterize in the spatial domain
             # w = tf.get_variable("weight", [channels, filters, height, width],
             #                                  initializer=tf.truncated_normal_initializer(0, stddev=0.01),
             #                                  dtype=tf.float32)
-            # w = tf.batch_fft2d(tf.complex(w, w*0.0))
+            # w = tf.fft2d(tf.complex(w, w*0.0))
 
             b = tf.Variable(tf.constant(0.1, shape=[filters]))
 
@@ -198,7 +206,7 @@ class FFTConvTest:
 
         # Prepare the source tensor for FFT
         source = tf.transpose(source, [0, 3, 1, 2])  # batch, channel, height, width
-        source_fft = tf.batch_fft2d(tf.complex(source, 0.0 * source))
+        source_fft = tf.fft2d(tf.complex(source, 0.0 * source))
 
         # Prepare the FFTd input tensor for element-wise multiplication with filter
         source_fft = tf.expand_dims(source_fft, 2)  # batch, channels, filters, height, width
@@ -218,7 +226,7 @@ class FFTConvTest:
         # Sum out the channel dimension, and prepare for bias_add
         # Note: The decision to sum out the channel dimension seems intuitive, but
         #       not necessarily theoretically sound.
-        conv = tf.real(tf.batch_ifft2d(conv))
+        conv = tf.real(tf.ifft2d(conv))
         conv = tf.reduce_sum(conv, reduction_indices=1)  # batch, filters, height, width
         conv = tf.transpose(conv, [0, 2, 3, 1])  # batch, height, width, filters
 
@@ -226,7 +234,7 @@ class FFTConvTest:
         w = tf.squeeze(w, [0])  # channels, filters, height, width
 
         # Compute a spatial encoding of the filter for visualization
-        spatial_filter = tf.batch_ifft2d(w)
+        spatial_filter = tf.ifft2d(w)
         spatial_filter = tf.transpose(spatial_filter, [2, 3, 0, 1])  # height, width, channels, filters
 
         # Add the bias (in the spatial domain)
@@ -255,7 +263,7 @@ class FFTConvTest:
         # used to initialize spectrally parameterized filters
         # an alternative to this is to initialize directly in the spectral domain
         w = tf.truncated_normal([channels, filters, height, width], mean=0, stddev=0.01)
-        fft = tf.batch_fft2d(tf.complex(w, 0.0 * w), name='spectral_initializer')
+        fft = tf.fft2d(tf.complex(w, 0.0 * w), name='spectral_initializer')
         return fft.eval(session=self.sess)
 
     def spectral_to_variable(self, init):
@@ -347,7 +355,9 @@ if __name__ == "__main__":
     baseline = FFTConvTest(operations='conv', spectral_regularization_alpha=1)
     print("Baseline Accuracy: {}".format(baseline.train()))
 
-    fft = FFTConvTest(operations='fft', spectral_regularization_alpha=2.3)
+    fft = FFTConvTest(operations='fft', spectral_regularization_alpha=1)
+    # fft = FFTConvTest(operations='fft', spectral_regularization_alpha=2.3)
+    # fft = FFTConvTest(operations='fft', initialization={'conv1': baseline.spectral_conv1.eval(session=baseline.sess),'conv2': baseline.spectral_conv2.eval(session=baseline.sess)})
     print("FFT Accuracy: {}".format(fft.train()))
 
     fftpure = FFTConvTest(operations='fft_pure', spectral_regularization_alpha=1)
